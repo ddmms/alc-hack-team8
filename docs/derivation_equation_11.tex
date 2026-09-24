@@ -1,0 +1,223 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsfonts,amsthm}
+\usepackage{physics}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{tcolorbox}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    citecolor=blue!70!black,
+    urlcolor=blue!70!black
+}
+
+\tcolorboxenvironment{equation}{
+  colback=blue!3!white,
+  colframe=blue!30!black,
+  boxrule=0.5pt,
+  arc=2pt
+}
+
+\title{\textbf{First-Principles Derivation of Equation (11) \\ in Harrelson et al. (2021)}}
+\author{\textbf{Analytical Inelastic Neutron Scattering Theory}}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This document provides a self-contained, mathematically rigorous, first-principles derivation of Equation~(11) and the ``almost-isotropic'' powder averaging formulation (Equation~12) from T.~F.~Harrelson et al., \emph{``Computing inelastic neutron scattering spectra from molecular dynamics trajectories''}, \textbf{Scientific Reports} 11, 7938 (2021). Starting from the Fermi Golden Rule and the harmonic phonon transition matrix elements on the unit sphere $S^2$, we calculate the spherical expectation values and cumulant resummation that lead directly to the analytical tensor contraction.
+\end{abstract}
+
+\vspace{1em}
+\hrule
+\vspace{1.5em}
+
+\section{Physical Foundation: Incoherent Single-Phonon Cross Section}
+
+In thermal inelastic neutron scattering (INS), a neutron exchanges momentum $\hbar \mathbf{q}$ and energy $\hbar \omega$ with a target nucleus. At low temperature ($T \to 0\text{ K}$), the transition from the ground vibrational state $\ket{0}$ to the single-phonon excited state $\ket{1_j}$ of normal mode $j$ is governed by the Fermi Golden Rule:
+\begin{equation}
+S_{0 \to 1}(\mathbf{q}, \omega) = \sum_i \sigma_i \left| \mel{1_j}{e^{i \mathbf{q} \cdot \hat{\mathbf{r}}_i}}{0} \right|^2 \delta(\omega - \omega_j)
+\end{equation}
+where:
+\begin{itemize}
+    \item $i$ indexes the atoms in the system,
+    \item $\sigma_i$ is the bound nuclear scattering cross section of atom $i$,
+    \item $\hat{\mathbf{r}}_i = \mathbf{R}_{i,0} + \hat{\mathbf{u}}_i$ decomposes the nuclear position into an equilibrium position $\mathbf{R}_{i,0}$ and a displacement operator $\hat{\mathbf{u}}_i$.
+\end{itemize}
+
+For harmonic vibrations, applying the Baker--Campbell--Hausdorff / Bloch theorem yields:
+\begin{equation}
+\mel{1_j}{e^{i \mathbf{q} \cdot \hat{\mathbf{u}}_i}}{0} = i (\mathbf{q} \cdot \mathbf{u}_{ij}) \exp\left( -W_i(\mathbf{q}) \right)
+\end{equation}
+where $\mathbf{u}_{ij} = \mel{1_j}{\hat{\mathbf{u}}_i}{0} = \sqrt{\frac{\hbar}{2 M_i \omega_j}} \mathbf{e}_{ij}$ is the ground-state displacement vector of atom $i$ in mode $j$, and $\exp(-2W_i(\mathbf{q}))$ is the Debye--Waller factor arising from zero-point fluctuations across all normal modes $k$:
+\begin{equation}
+2 W_i(\mathbf{q}) = \ev{(\mathbf{q} \cdot \hat{\mathbf{u}}_i)^2}{0} = \sum_k (\mathbf{q} \cdot \mathbf{u}_{ik})^2
+\end{equation}
+
+Substituting this into the transition probability gives \textbf{Equation (10)} of Harrelson et al.:
+\begin{equation}
+S_{0 \to 1}(\mathbf{q}, \omega_j) = \sum_i \sigma_i (\mathbf{q} \cdot \mathbf{u}_{ij})^2 \exp\left[ -\sum_k (\mathbf{q} \cdot \mathbf{u}_{ik})^2 \right]
+\label{eq:harrelson10}
+\end{equation}
+
+\section{Tensorial Formulation of Displacements}
+
+The scalar products can be expressed in terms of symmetric $3 \times 3$ outer-product tensors. For the transition prefactor:
+\begin{equation}
+(\mathbf{q} \cdot \mathbf{u}_{ij})^2 = (\mathbf{q}^T \mathbf{u}_{ij})(\mathbf{u}_{ij}^T \mathbf{q}) = \mathbf{q}^T (\mathbf{u}_{ij} \mathbf{u}_{ij}^T) \mathbf{q} = \mathbf{q}^T \mathbf{B}_{ij} \mathbf{q}
+\end{equation}
+where \textbf{Equation (13)} defines the single-mode displacement tensor:
+\begin{equation}
+\mathbf{B}_{ij} \equiv \mathbf{u}_{ij} \mathbf{u}_{ij}^T \in \mathbb{R}^{3 \times 3}
+\end{equation}
+
+Similarly, the total Debye--Waller exponent sums over all vibrational modes $k$:
+\begin{equation}
+\sum_k (\mathbf{q} \cdot \mathbf{u}_{ik})^2 = \mathbf{q}^T \left( \sum_k \mathbf{B}_{ik} \right) \mathbf{q} = \mathbf{q}^T \mathbf{A}_i \mathbf{q}
+\end{equation}
+where \textbf{Equation (14)} defines the total atomic thermal displacement tensor:
+\begin{equation}
+\mathbf{A}_i \equiv \sum_k \mathbf{B}_{ik} = \ev{\mathbf{u}_i \mathbf{u}_i^T} \in \mathbb{R}^{3 \times 3}
+\end{equation}
+Both $\mathbf{B}_{ij}$ and $\mathbf{A}_i$ are real, symmetric, positive semi-definite tensors.
+
+\section{The Powder Averaging Integral on the Sphere $S^2$}
+
+In a polycrystalline powder or an unoriented amorphous sample, the orientation of the momentum transfer vector $\mathbf{q}$ is uniformly distributed in space. Decomposing $\mathbf{q} = q \hat{\mathbf{n}}$, with $q = |\mathbf{q}|$ and $\hat{\mathbf{n}} \in S^2$ ($|\hat{\mathbf{n}}| = 1$), the powder average (\textbf{Equation 9}) is:
+\begin{equation}
+\ev{S_{0 \to 1}(q, \omega_j)} = \frac{1}{4\pi} \int_{S^2} S_{0 \to 1}(q \hat{\mathbf{n}}, \omega_j) \, d\Omega = \sum_i \sigma_i q^2 \ev{(\hat{\mathbf{n}}^T \mathbf{B}_{ij} \hat{\mathbf{n}}) \exp(-q^2 \hat{\mathbf{n}}^T \mathbf{A}_i \hat{\mathbf{n}})}_{S^2}
+\end{equation}
+
+For each atom $i$, the central mathematical challenge is evaluating the orientational expectation value:
+\begin{equation}
+\mathcal{I} \equiv \ev{(\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}}) \exp(-q^2 \hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}})}_{S^2} = \frac{1}{4\pi} \int_{S^2} (\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}}) \exp(-q^2 \hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}}) \, d\Omega
+\end{equation}
+
+\section{Step-by-Step Derivation via Cumulant Expansion}
+
+\subsection{Step 1: Reformulation as a Directional Probability Density}
+Since $\mathbf{B} = \mathbf{u} \mathbf{u}^T$ is positive semi-definite, $\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}} \ge 0$. We treat $\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}}$ as a directional probability weight on the unit sphere.
+
+The unweighted spherical average of this quadratic form is:
+\begin{equation}
+\ev{\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}}}_{S^2} = \sum_{\alpha, \beta} B_{\alpha\beta} \ev{n_\alpha n_\beta}_{S^2}
+\end{equation}
+By the spherical symmetry of $S^2$:
+\begin{equation}
+\ev{n_\alpha n_\beta}_{S^2} = \frac{1}{3} \delta_{\alpha\beta}
+\end{equation}
+which follows immediately from $\ev{n_x^2} = \ev{n_y^2} = \ev{n_z^2}$ and $\ev{n_x^2 + n_y^2 + n_z^2} = 1$. Thus:
+\begin{equation}
+\ev{\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}}}_{S^2} = \frac{1}{3} \sum_\alpha B_{\alpha\alpha} = \frac{1}{3} \Tr(\mathbf{B})
+\end{equation}
+
+Multiplying and dividing $\mathcal{I}$ by $\frac{1}{3} \Tr(\mathbf{B})$:
+\begin{equation}
+\mathcal{I} = \left( \frac{1}{3} \Tr(\mathbf{B}) \right) \cdot \frac{\ev{(\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}}) \exp(-q^2 \hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}})}_{S^2}}{\ev{\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}}}_{S^2}} \equiv \left( \frac{1}{3} \Tr(\mathbf{B}) \right) \ev{\exp(-q^2 \hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}})}_{\mathbf{B}}
+\end{equation}
+where $\ev{\cdot}_{\mathbf{B}}$ denotes the expectation value under the $\mathbf{B}$-weighted distribution.
+
+\subsection{Step 2: First Cumulant Approximation}
+Applying the cumulant expansion $\ln \ev{e^{-q^2 X}} = -q^2 \ev{X} + \mathcal{O}(q^4)$ yields:
+\begin{equation}
+\ev{\exp(-q^2 \hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}})}_{\mathbf{B}} \approx \exp\left( -q^2 \ev{\hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}}}_{\mathbf{B}} \right) = \exp(-q^2 \alpha)
+\end{equation}
+where the effective attenuation factor $\alpha$ is defined as:
+\begin{equation}
+\alpha \equiv \ev{\hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}}}_{\mathbf{B}} = \frac{\ev{(\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}})(\hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}})}_{S^2}}{\frac{1}{3} \Tr(\mathbf{B})}
+\label{eq:alpha_def}
+\end{equation}
+
+\subsection{Step 3: Fourth-Order Moment of the Unit Sphere}
+The numerator requires calculating the fourth moment tensor:
+\begin{equation}
+\ev{(\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}})(\hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}})}_{S^2} = \sum_{\alpha, \beta, \gamma, \delta} B_{\alpha\beta} A_{\gamma\delta} \ev{n_\alpha n_\beta n_\gamma n_\delta}_{S^2}
+\end{equation}
+
+By rotational invariance, any isotropic fourth-rank tensor must be constructed from pairwise Kronecker deltas:
+\begin{equation}
+\ev{n_\alpha n_\beta n_\gamma n_\delta}_{S^2} = C \left( \delta_{\alpha\beta} \delta_{\gamma\delta} + \delta_{\alpha\gamma} \delta_{\beta\delta} + \delta_{\alpha\delta} \delta_{\beta\gamma} \right)
+\end{equation}
+
+To determine the scalar constant $C$, contract indices $\gamma$ and $\delta$ ($\sum_\gamma n_\gamma^2 = 1$):
+\begin{equation}
+\sum_{\gamma=1}^3 \ev{n_\alpha n_\beta n_\gamma n_\gamma} = \ev{n_\alpha n_\beta \cdot 1} = \frac{1}{3} \delta_{\alpha\beta}
+\end{equation}
+Evaluating the right-hand side:
+\begin{equation}
+C \sum_{\gamma=1}^3 \left( \delta_{\alpha\beta} \delta_{\gamma\gamma} + \delta_{\alpha\gamma} \delta_{\beta\gamma} + \delta_{\alpha\delta} \delta_{\beta\gamma} \right) = C (3 \delta_{\alpha\beta} + \delta_{\alpha\beta} + \delta_{\alpha\beta}) = 5 C \delta_{\alpha\beta}
+\end{equation}
+Equating both expressions gives $5 C = 1/3 \implies C = 1/15$. Hence:
+\begin{equation}
+\ev{n_\alpha n_\beta n_\gamma n_\delta}_{S^2} = \frac{1}{15} \left( \delta_{\alpha\beta} \delta_{\gamma\delta} + \delta_{\alpha\gamma} \delta_{\beta\delta} + \delta_{\alpha\delta} \delta_{\beta\gamma} \right)
+\end{equation}
+
+\subsection{Step 4: Tensor Contraction}
+Contracting with symmetric tensors $B_{\alpha\beta}$ and $A_{\gamma\delta}$:
+\begin{align}
+\sum_{\alpha, \beta, \gamma, \delta} B_{\alpha\beta} A_{\gamma\delta} \delta_{\alpha\beta} \delta_{\gamma\delta} &= \left( \sum_\alpha B_{\alpha\alpha} \right) \left( \sum_\gamma A_{\gamma\gamma} \right) = \Tr(\mathbf{B}) \Tr(\mathbf{A}) \\
+\sum_{\alpha, \beta, \gamma, \delta} B_{\alpha\beta} A_{\gamma\delta} \delta_{\alpha\gamma} \delta_{\beta\delta} &= \sum_{\alpha, \beta} B_{\alpha\beta} A_{\alpha\beta} = \mathbf{B} : \mathbf{A} = \Tr(\mathbf{B} \mathbf{A}) \\
+\sum_{\alpha, \beta, \gamma, \delta} B_{\alpha\beta} A_{\gamma\delta} \delta_{\alpha\delta} \delta_{\beta\gamma} &= \sum_{\alpha, \beta} B_{\alpha\beta} A_{\beta\alpha} = \Tr(\mathbf{B} \mathbf{A}^T) = \Tr(\mathbf{B} \mathbf{A}) = \mathbf{B} : \mathbf{A}
+\end{align}
+Summing these three contributions:
+\begin{equation}
+\ev{(\hat{\mathbf{n}}^T \mathbf{B} \hat{\mathbf{n}})(\hat{\mathbf{n}}^T \mathbf{A} \hat{\mathbf{n}})}_{S^2} = \frac{1}{15} \left[ \Tr(\mathbf{B}) \Tr(\mathbf{A}) + 2 (\mathbf{B} : \mathbf{A}) \right]
+\end{equation}
+
+\subsection{Step 5: Exact Assembly of $\alpha_{ij}$ (Equation 12)}
+Substituting into Equation~(\ref{eq:alpha_def}):
+\begin{equation}
+\alpha_{ij} = \frac{\frac{1}{15} \left[ \Tr(\mathbf{B}_{ij}) \Tr(\mathbf{A}_i) + 2 (\mathbf{B}_{ij} : \mathbf{A}_i) \right]}{\frac{1}{3} \Tr(\mathbf{B}_{ij})} = \frac{3}{15} \left[ \Tr(\mathbf{A}_i) + 2 \frac{\mathbf{B}_{ij} : \mathbf{A}_i}{\Tr(\mathbf{B}_{ij})} \right]
+\end{equation}
+\begin{equation}
+\alpha_{ij} = \frac{1}{5} \left[ \Tr(\mathbf{A}_i) + 2 \left( \frac{\mathbf{B}_{ij} : \mathbf{A}_i}{\Tr(\mathbf{B}_{ij})} \right) \right]
+\label{eq:harrelson12}
+\end{equation}
+\textbf{This is Equation (12) of Harrelson et al. (2021).}
+
+\subsection{Step 6: Final Form of Equation (11)}
+Substituting $\alpha_{ij}$ back into $\mathcal{I}$:
+\begin{equation}
+\mathcal{I} = \frac{1}{3} \Tr(\mathbf{B}_{ij}) \exp(-q^2 \alpha_{ij})
+\end{equation}
+Multiplying by $q^2$ and summing over all atoms $i$:
+\begin{equation}
+\ev{S_{0 \to 1}(q, \omega_j)} \approx \sum_i \frac{q^2}{3} \Tr(\mathbf{B}_{ij}) \exp(-q^2 \alpha_{ij})
+\label{eq:harrelson11}
+\end{equation}
+\textbf{This is Equation (11) of Harrelson et al. (2021).} \qed
+
+\section{Limiting Cases and Physical Interpretation}
+
+\begin{enumerate}
+    \item \textbf{Isotropic Limit:}
+    When the system is isotropic, $\mathbf{A}_i = \frac{1}{3} \Tr(\mathbf{A}_i) \mathbf{I} = \ev{u_i^2} \mathbf{I}$. Then:
+    \begin{equation}
+    \frac{\mathbf{B}_{ij} : \mathbf{A}_i}{\Tr(\mathbf{B}_{ij})} = \frac{\Tr(\mathbf{B}_{ij} \cdot \frac{1}{3}\Tr(\mathbf{A}_i)\mathbf{I})}{\Tr(\mathbf{B}_{ij})} = \frac{1}{3} \Tr(\mathbf{A}_i)
+    \end{equation}
+    Consequently:
+    \begin{equation}
+    \alpha_{ij} = \frac{1}{5} \left[ \Tr(\mathbf{A}_i) + \frac{2}{3} \Tr(\mathbf{A}_i) \right] = \frac{1}{3} \Tr(\mathbf{A}_i) = \ev{u_i^2}
+    \end{equation}
+    and the attenuation becomes $\exp(-q^2 \ev{u_i^2}) = \exp(-2W_i)$, which is the exact isotropic Debye--Waller factor.
+
+    \item \textbf{Anisotropic Vibrations along a Coordinate Axis:}
+    Consider a vibration oriented purely along the Cartesian $z$-axis, so that $\mathbf{B}_{ij} = \operatorname{diag}(0, 0, B_{zz})$. Then:
+    \begin{equation}
+    \frac{\mathbf{B}_{ij} : \mathbf{A}_i}{\Tr(\mathbf{B}_{ij})} = \frac{B_{zz} A_{i, zz}}{B_{zz}} = A_{i, zz}
+    \end{equation}
+    The powder attenuation factor becomes:
+    \begin{equation}
+    \alpha_{ij} = \frac{1}{5} \left[ (A_{i, xx} + A_{i, yy} + A_{i, zz}) + 2 A_{i, zz} \right] = \frac{1}{5} (A_{i, xx} + A_{i, yy} + 3 A_{i, zz})
+    \end{equation}
+    \emph{Physical significance:} The thermal displacement along the mode direction ($z$) receives a weight of $\frac{3}{5} = 60\%$, whereas orthogonal directions receive only $\frac{1}{5} = 20\%$ each. This correctly accounts for the fact that neutrons must transfer momentum parallel to the mode polarization vector to excite the vibration, and therefore primarily sample the thermal displacement along that specific axis.
+\end{enumerate}
+
+\end{document}
