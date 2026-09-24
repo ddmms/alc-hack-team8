@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra euphonic
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra euphonic --python ${{ matrix.python-version }}
+      # Fast tests on every push; the slow tier runs molecular dynamics and is
+      # reserved for the nightly schedule.
+      - name: Fast tests
+        run: uv run pytest -m "not slow and not reference" --cov=mdins --cov-report=term-missing
+
+  slow:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync --extra euphonic
+      # Exit code 5 is "no tests collected". The slow tier is empty until M2 lands the
+      # first molecular dynamics fixture, and a nightly job that fails for that reason
+      # trains everyone to ignore it.
+      - name: End-to-end tests
+        run: |
+          uv run pytest -m "slow or reference" --durations=10 || status=$?
+          if [ "${status:-0}" -eq 5 ]; then
+            echo "::notice::no slow or reference tests collected yet (expected before M2)"
+            exit 0
+          fi
+          exit "${status:-0}"
