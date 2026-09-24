@@ -42,8 +42,10 @@ dev = [
   "mypy>=1.11",
   "scipy-stubs>=1.14",
 ]
-# Only needed to regenerate the figures in docs/validation.md, which are committed.
-docs = ["matplotlib>=3.8"]
+# Only needed to regenerate the figures in docs/validation.md, which are committed, and
+# to run docs/interactive-validation.ipynb (Plotly for the figures, jupyter to execute
+# it; the committed notebook carries its outputs, so a reader needs neither).
+docs = ["matplotlib>=3.8", "plotly>=5.22", "nbformat>=5.10", "jupyter>=1.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mdins"]
@@ -86,3 +88,7 @@ strict_equality = true
 [tool.ruff.lint.per-file-ignores]
 # `value == pytest.approx(...)` is the idiomatic order, not a Yoda condition.
 "tests/**" = ["SIM300"]
+# The same exception, for the same reason — `energies <= limit` is a boolean mask, and
+# writing it the other way round would obscure that. Plus RUF001: σ in a printed results
+# table is a standard deviation, not a mistyped `o`.
+"docs/interactive-validation.ipynb" = ["SIM300", "RUF001"]

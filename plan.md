@@ -4,6 +4,9 @@ Concrete work breakdown for the architecture in [`design.md`](design.md). That d
 deliberately stopped short of module layout and signatures; this one supplies them, plus
 sequencing and the test strategy.
 
+The milestones below are broken down into individual units of work, with dependencies and
+acceptance criteria, in [`docs/issues/`](docs/issues/README.md).
+
 ---
 
 ## 1. Package and tooling
@@ -190,13 +193,24 @@ Invariants asserted as properties across randomised inputs:
                      └── NVE MD, low T      → mdins → pdos()
   ```
 
-  Two traps that will produce a spurious mismatch, both of which belong in the test's
-  docstring: the Euphonic reference must use the q-grid commensurate with the MD
-  supercell, and the MD must be cold enough to stay harmonic. Comparison is on normalised
-  lineshapes (D6), with tolerance derived from the Welch inter-segment spread (D5).
+  Three traps that will produce a spurious mismatch or a spurious agreement, all of
+  which belong in the test's docstring: the Euphonic reference must use the q-grid
+  commensurate with the MD supercell; the MD must be cold enough to stay harmonic; and
+  **the tolerance must not come from the Welch inter-segment spread of a single run**.
+  In NVE the normal-mode energies are constants of motion fixed by the initial
+  `MaxwellBoltzmannDistribution` draw, so every segment of one trajectory sees the same
+  mode occupation. The inter-segment spread therefore measures phase and leakage noise
+  at fixed occupation, and misses the dominant term — measured here, it is about four
+  times too small, and the comparison passes on some seeds and fails on others. The
+  tolerance is instead the scatter of each statistic over an ensemble of independent
+  runs (ten seeds), which has the further advantage of requiring no assumption about
+  how errors correlate between bins or between atoms, because nothing is propagated.
+  Comparison is on normalised lineshapes (D6).
 
-Determinism: fixed RNG seeds, NVE rather than Langevin where possible. Where a thermostat
-is unavoidable, assert statistically with a stated confidence rather than pinning numbers.
+Determinism: fixed RNG seeds, NVE rather than Langevin where possible. A fixed seed
+makes a run reproducible; it does not make one run representative, so any statistic
+quoted with an uncertainty needs the ensemble above. Where a thermostat is unavoidable,
+assert statistically with a stated confidence rather than pinning numbers.
 
 ### Layer 4 — regression (fast)
 
@@ -243,15 +257,19 @@ Scripted, run on demand, results written up rather than asserted:
 - **M2** — Einstein crystal exact; LJ crystal within stated tolerance of Euphonic, with
   the tolerance justified rather than tuned. *Done.* `tests/test_md.py` covers the
   Einstein crystal; `tests/test_euphonic.py` compares 3×3×3 LJ argon at 10 K against
-  Euphonic on the commensurate q-grid. The tolerance is the Welch inter-segment spread
-  propagated through each moment, not a fitted number: it comes out at 0.95% on the
-  first moment and 1.73% on the second, and the observed discrepancies are 0.6σ and
-  0.3σ. A negative control asserts that the same threshold rejects a 5% frequency
-  error, so the agreement is a measurement rather than a tolerance wide enough to
-  admit anything. A second crystal — ordered Ar/Kr, where the species-blind potential
-  makes mass the only asymmetry — checks the per-species projection, which the
-  single-species case cannot: every per-species moment agrees within 1.2σ. Written up
-  with figures in `docs/validation.md`.
+  Euphonic on the commensurate q-grid. The tolerance is measured rather than fitted:
+  each statistic is computed for ten independent NVE runs and compared against the
+  standard error of their mean, which is the only defensible choice given the frozen
+  mode occupations described in Layer 3 above. A negative control asserts that the same
+  threshold rejects a 5% frequency error — discriminating at about 3.5%, weaker than the
+  1% the within-run spread would have claimed but still far tighter than any plausible
+  unit error. A second crystal — ordered Ar/Kr, where the species-blind potential makes
+  mass the only asymmetry — checks the per-species projection, which the single-species
+  case cannot. Everything passes at 3σ, but all six moment comparisons deviate in the
+  *same* direction, by about +2% in ⟨E⟩ and +4–5% in ⟨E²⟩; that systematic is consistent
+  with residual anharmonicity plus the ~1% of weight Welch leakage puts above the band
+  top, and it is documented rather than absorbed into a wider tolerance. Written up with
+  figures in `docs/validation.md`.
 - **M3** — TOSCA spectrum for a published system, order-resolved, Layer 2's analytic
   multiphonon test passing.
 - **M4** — anisotropic path reproduces the isotropic one on isotropic input, and differs

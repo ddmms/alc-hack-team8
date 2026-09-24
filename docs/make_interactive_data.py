@@ -31,6 +31,12 @@ instead of calling it. ``run_nve`` returns only the spectral density and discard
 velocities, and it is asserted on by the M2 test suite, so it is not the place to add a
 return value. Everything that defines the physics — potential, timestep, dump interval,
 equilibration — is imported from there, so the two cannot drift apart.
+
+A second, independent cache — ``docs/figures/interactive-benzene-data.npz`` — holds the
+same estimator sweep applied to a MACE-MP NVE trajectory of solid benzene that was
+produced outside this repository. That half runs no dynamics at all, only re-estimation,
+so it is a few seconds; it is kept in its own file precisely so that rebuilding it does
+not drag the six minutes of Lennard-Jones MD along with it.
 """
 
 from __future__ import annotations
@@ -69,6 +75,7 @@ from tests.lj_reference import (  # noqa: E402
 from mdins.provenance import Provenance  # noqa: E402 - needs the path above
 from mdins.spectral import velocity_spectral_density  # noqa: E402
 from mdins.trajectory import VelocityTrajectory  # noqa: E402
+from mdins.units import KB, PLANCK  # noqa: E402
 
 if TYPE_CHECKING:  # pragma: no cover
     from ase import Atoms
@@ -358,6 +365,327 @@ def compute(tmp: Path) -> dict[str, Any]:
     return data
 
 
+# =====================================================================================
+# Solid benzene: the same estimator sweep on a real MD trajectory
+# =====================================================================================
+#
+# Everything above is a Lennard-Jones crystal run inside this repository against a
+# Euphonic reference. This half is the opposite situation: a trajectory somebody else
+# produced, with no harmonic reference available, so nothing here can be a validation.
+# It is a demonstration that the estimator behaves the same way on real data, and — as
+# it turns out — a fairly sharp diagnostic of the trajectory itself.
+
+#: Where the trajectory is expected to sit, relative to the repository root. Not
+#: committed: 12.9 MB of extxyz is too much to carry in git, and unlike the caches it
+#: cannot be regenerated from anything in this repository.
+BENZENE_TRAJECTORY = (
+    ROOT / "docs" / "data" / "benzene_solid-average-nve-T25.0-traj.extxyz"
+)
+
+BENZENE_CACHE = FIGURES / "interactive-benzene-data.npz"
+
+#: Frame spacing in ps. **Read from the file, not assumed.** Each frame's ``info``
+#: carries ``time`` and ``step``, and a ``units`` dictionary that states ``"time":
+#: "fs"``; consecutive frames are ``step`` 0, 100, 200 … at ``time`` 0.0, 100.0,
+#: 200.0 fs — a 1 fs integration timestep dumped every 100 steps.
+#: :func:`benzene_dt` re-derives this from the file at build time and fails loudly if it
+#: disagrees, because every energy in this section scales inversely with it.
+BENZENE_DT = 0.1
+
+#: Truncations of the 1001 frames, in frames: 12.8 ps to the full 100.1 ps.
+BENZENE_LENGTHS = (128, 192, 256, 384, 512, 768, 1001)
+
+#: Welch segment lengths, in frames. 0.65 meV down to 0.081 meV of nominal resolution.
+BENZENE_SEGMENTS = (64, 128, 256, 512)
+
+BENZENE_WINDOWS = ("hann", "hamming", "blackman", "boxcar")
+BENZENE_OVERLAPS = (0.0, 0.25, 0.5, 0.75)
+BENZENE_OVERLAP_SEGMENT = 256
+
+#: Decimation factors for the aliasing experiment. Throwing away every other frame
+#: halves the Nyquist energy, and whatever extra weight then appears below the new limit
+#: is weight that was folded down — measured rather than argued.
+BENZENE_DECIMATIONS = (1, 2)
+
+BENZENE_N_BINS = 400
+BENZENE_SPECIES = ("C", "H")
+
+#: Shared grid for the decimation panel, just inside the dt = 0.2 ps Nyquist energy so
+#: that both rates can be asked for the same interval.
+BENZENE_LOW_E_MAX = 0.999 * PLANCK / (2.0 * 2 * BENZENE_DT)
+
+
+def benzene_dt(path: Path) -> float:
+    """Frame spacing in ps, recovered from the trajectory's own ``info`` fields.
+
+    Raises:
+        ValueError: If the file does not record times in fs, or if the spacing is not
+            uniform, or if it differs from :data:`BENZENE_DT`. Any of those would make
+            every energy in this section wrong by a constant factor with no other
+            symptom, so none of them is allowed to pass silently.
+    """
+    from ase.io import read
+
+    frames = read(str(path), index=":3")
+    units = frames[0].info.get("units", {})
+    if units.get("time") != "fs":
+        raise ValueError(f"{path} does not record times in fs: units={units!r}")
+    times = np.array([frame.info["time"] for frame in frames])
+    spacings = np.diff(times) * 1e-3
+    if not np.allclose(spacings, spacings[0], rtol=1e-6):
+        raise ValueError(f"non-uniform frame spacing in {path}: {spacings} ps")
+    if not np.isclose(spacings[0], BENZENE_DT, rtol=1e-6):
+        raise ValueError(
+            f"{path} records a {spacings[0]} ps frame spacing but BENZENE_DT is "
+            f"{BENZENE_DT} ps. Every energy scales inversely with this; fix the "
+            "constant."
+        )
+    return float(spacings[0])
+
+
+def benzene_trajectory() -> VelocityTrajectory:
+    """The benzene trajectory, drift removed, read through the package's own loader."""
+    from mdins.trajectory import read_velocities
+
+    if not BENZENE_TRAJECTORY.exists():
+        raise FileNotFoundError(
+            f"{BENZENE_TRAJECTORY} does not exist. It is a 12.9 MB MACE-MP NVE run of "
+            "solid benzene and is deliberately not committed; place it at that path to "
+            "rebuild the benzene half of the notebook."
+        )
+    dt = benzene_dt(BENZENE_TRAJECTORY)
+    return read_velocities(BENZENE_TRAJECTORY, dt=dt).remove_com_velocity()
+
+
+def benzene_estimate(
+    trajectory: VelocityTrajectory,
+    *,
+    n_frames: int | None = None,
+    segment_length: int = 256,
+    overlap: float = 0.5,
+    window: str = "hann",
+    estimator: str = "welch",
+    frequencies: NDArray[np.float64] | None = None,
+) -> VelocitySpectralDensity:
+    """One estimate from the stored benzene velocities.
+
+    ``segment_length`` doubles as the VACF maximum lag, so that the two estimators are
+    compared at the same nominal resolution rather than at their respective defaults.
+    """
+    truncated = (
+        trajectory
+        if n_frames is None
+        else replace(trajectory, velocities=trajectory.velocities[:n_frames])
+    )
+    if frequencies is None:
+        frequencies = np.linspace(
+            0.0, 0.999 * truncated.max_resolvable_energy, BENZENE_N_BINS
+        )
+    return velocity_spectral_density(
+        truncated,
+        frequencies=frequencies,
+        estimator=estimator,
+        segment_length=segment_length if estimator == "welch" else None,
+        max_lag=segment_length if estimator == "vacf" else None,
+        overlap=overlap,
+        window=window,
+        temperature=truncated.temperature(),
+        ensemble="NVE",
+    )
+
+
+#: Keys produced by :func:`benzene_summarise`, and the shape of each per estimate.
+BENZENE_SHAPES: dict[str, tuple[int, ...]] = {
+    "total": (BENZENE_N_BINS,),
+    "C": (BENZENE_N_BINS,),
+    "H": (BENZENE_N_BINS,),
+    "C_error": (BENZENE_N_BINS,),
+    "H_error": (BENZENE_N_BINS,),
+    "C_integral": (),
+    "H_integral": (),
+    "m1": (),
+    "m2": (),
+    "s1": (),
+    "s2": (),
+    "n_segments": (),
+    "resolution": (),
+}
+
+
+def benzene_summarise(density: VelocitySpectralDensity) -> dict[str, Any]:
+    """Absolute per-species pDOS and the integrals the sum rule is stated in.
+
+    Unlike :func:`summarise`, nothing here is normalised to unit area. The whole point
+    of this section is that the absolute scale is checkable —
+    ``∫ tr P_i dE = 3 k_B T / m_i`` — and normalising would throw away the only
+    quantitative handle available without a harmonic reference.
+
+    Per-atom errors within a species are averaged rather than added in quadrature, for
+    the reason :func:`tests.lj_reference.species_weight` gives: atoms of one species
+    sample the same modes, so their segment-to-segment fluctuations move together.
+    """
+    from mdins.ir import bin_widths
+
+    energies = density.frequencies
+    widths = bin_widths(energies)
+    symbols = np.asarray(density.symbols)
+    pdos = density.pdos()
+    std = (
+        density.pdos_std if density.pdos_std is not None else np.full_like(pdos, np.nan)
+    )
+
+    row: dict[str, Any] = {
+        "total": density.total_pdos(),
+        "n_segments": float(density.metadata.n_segments or 0),
+        "resolution": float(density.metadata.energy_resolution or np.nan),
+    }
+    for species in BENZENE_SPECIES:
+        index = symbols == species
+        row[species] = pdos[index].mean(axis=0)
+        row[f"{species}_error"] = std[index].mean(axis=0)
+        # 3x because pdos() is tr(P)/3 and the sum rule is stated on the trace.
+        row[f"{species}_integral"] = float(3.0 * (row[species] * widths).sum())
+
+    # Moments of the hydrogen projection: the INS-relevant one, and the quantity the
+    # estimator sweeps below are read against. Not a physical spectrum — see the
+    # notebook on aliasing — but a perfectly good stability metric.
+    weight, error = row["H"], row["H_error"]
+    row["m1"] = moment(energies, weight, 1)
+    row["m2"] = moment(energies, weight, 2)
+    row["s1"] = moment_uncertainty(energies, weight, error, 1)
+    row["s2"] = moment_uncertainty(energies, weight, error, 2)
+    return row
+
+
+def benzene_stack(rows: list[dict[str, Any]], prefix: str, shape: tuple[int, ...]):
+    """Fold :func:`benzene_summarise` outputs into a keyed, rectangular grid."""
+    return {
+        f"{prefix}_{key}": np.array([row[key] for row in rows]).reshape(
+            (*shape, *trailing)
+        )
+        for key, trailing in BENZENE_SHAPES.items()
+    }
+
+
+def compute_benzene() -> dict[str, Any]:
+    """Every benzene estimate the notebook needs. No MD: the trajectory is on disk."""
+    trajectory = benzene_trajectory()
+    symbols = np.asarray(trajectory.symbols)
+    energies = np.linspace(
+        0.0, 0.999 * trajectory.max_resolvable_energy, BENZENE_N_BINS
+    )
+
+    data: dict[str, Any] = {
+        "benzene_energies": energies,
+        "benzene_lengths": np.array(BENZENE_LENGTHS),
+        "benzene_segments": np.array(BENZENE_SEGMENTS),
+        "benzene_windows": np.array(BENZENE_WINDOWS),
+        "benzene_overlaps": np.array(BENZENE_OVERLAPS),
+        "benzene_overlap_segment": BENZENE_OVERLAP_SEGMENT,
+        "benzene_decimations": np.array(BENZENE_DECIMATIONS),
+        "benzene_dt": trajectory.dt,
+        "benzene_nyquist": trajectory.max_resolvable_energy,
+        "benzene_duration": trajectory.duration,
+        "benzene_n_frames": trajectory.n_frames,
+        "benzene_n_atoms": trajectory.n_atoms,
+        "benzene_temperature": trajectory.temperature(),
+        "benzene_temperature_drift": trajectory.temperature_drift(),
+        "benzene_masses": np.array(
+            [trajectory.masses[symbols == s][0] for s in BENZENE_SPECIES]
+        ),
+        "benzene_counts": np.array(
+            [int((symbols == s).sum()) for s in BENZENE_SPECIES]
+        ),
+    }
+
+    # Kinetic temperature of each species separately, straight from the velocities.
+    # This is the number that turns out to matter most, and it needs no estimator.
+    for species in BENZENE_SPECIES:
+        index = symbols == species
+        square = (trajectory.velocities[:, index] ** 2).sum(axis=-1)
+        mass = trajectory.masses[index][0]
+        data[f"benzene_T_{species}"] = float(mass * square.mean() / (3.0 * KB))
+        data[f"benzene_msv_{species}"] = float(square.mean(axis=0).mean())
+
+    start = time.perf_counter()
+
+    # -- length x segment --------------------------------------------------------------
+    rows = [
+        benzene_summarise(
+            benzene_estimate(
+                trajectory, n_frames=n, segment_length=s, frequencies=energies
+            )
+        )
+        if n >= s
+        else {key: np.full(shape, np.nan) for key, shape in BENZENE_SHAPES.items()}
+        for n in BENZENE_LENGTHS
+        for s in BENZENE_SEGMENTS
+    ]
+    data |= benzene_stack(
+        rows, "benzene_grid", (len(BENZENE_LENGTHS), len(BENZENE_SEGMENTS))
+    )
+
+    # -- window x segment, at full length ----------------------------------------------
+    rows = [
+        benzene_summarise(
+            benzene_estimate(
+                trajectory, segment_length=s, window=w, frequencies=energies
+            )
+        )
+        for w in BENZENE_WINDOWS
+        for s in BENZENE_SEGMENTS
+    ]
+    data |= benzene_stack(
+        rows, "benzene_window", (len(BENZENE_WINDOWS), len(BENZENE_SEGMENTS))
+    )
+
+    # -- overlap -----------------------------------------------------------------------
+    rows = [
+        benzene_summarise(
+            benzene_estimate(
+                trajectory,
+                segment_length=BENZENE_OVERLAP_SEGMENT,
+                overlap=o,
+                frequencies=energies,
+            )
+        )
+        for o in BENZENE_OVERLAPS
+    ]
+    data |= benzene_stack(rows, "benzene_overlap", (len(BENZENE_OVERLAPS),))
+
+    # -- welch against vacf, at matched nominal resolution -----------------------------
+    rows = [
+        benzene_summarise(
+            benzene_estimate(
+                trajectory, segment_length=s, estimator=e, frequencies=energies
+            )
+        )
+        for e in ("welch", "vacf")
+        for s in BENZENE_SEGMENTS
+    ]
+    data |= benzene_stack(rows, "benzene_estimator", (2, len(BENZENE_SEGMENTS)))
+
+    # -- decimation: aliasing measured rather than asserted ----------------------------
+    low = np.linspace(0.0, BENZENE_LOW_E_MAX, BENZENE_N_BINS)
+    data["benzene_low_energies"] = low
+    rows = []
+    for factor in BENZENE_DECIMATIONS:
+        thinned = replace(
+            trajectory,
+            velocities=trajectory.velocities[::factor],
+            dt=trajectory.dt * factor,
+        )
+        rows.append(
+            benzene_summarise(
+                benzene_estimate(thinned, segment_length=512 // factor, frequencies=low)
+            )
+        )
+    data |= benzene_stack(rows, "benzene_decimated", (len(BENZENE_DECIMATIONS),))
+
+    print(f"benzene: estimates in {time.perf_counter() - start:.1f} s")
+    return data
+
+
 def load() -> dict[str, NDArray[np.float64]]:
     """Read the cache, with a message pointing at this script if it is not there."""
     if not CACHE.exists():
@@ -367,6 +695,17 @@ def load() -> dict[str, NDArray[np.float64]]:
             "python docs/make_interactive_data.py"
         )
     return dict(np.load(CACHE))
+
+
+def load_benzene() -> dict[str, NDArray[np.float64]]:
+    """Read the benzene cache. Kept separate from :func:`load` so that rebuilding it
+    does not mean re-running six minutes of Lennard-Jones molecular dynamics."""
+    if not BENZENE_CACHE.exists():
+        raise FileNotFoundError(
+            f"{BENZENE_CACHE} does not exist. Build it with\n"
+            "    uv run --group docs python docs/make_interactive_data.py"
+        )
+    return dict(np.load(BENZENE_CACHE))
 
 
 def main() -> None:
@@ -379,6 +718,14 @@ def main() -> None:
     args = parser.parse_args()
 
     FIGURES.mkdir(exist_ok=True)
+
+    if BENZENE_CACHE.exists() and not args.refresh:
+        print(f"using cached {BENZENE_CACHE}")
+    else:
+        start = time.perf_counter()
+        np.savez(BENZENE_CACHE, **compute_benzene())
+        print(f"wrote {BENZENE_CACHE} in {time.perf_counter() - start:.0f} s")
+
     if CACHE.exists() and not args.refresh:
         print(f"using cached {CACHE}")
         return

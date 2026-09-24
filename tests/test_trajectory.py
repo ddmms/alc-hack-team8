@@ -7,10 +7,10 @@ import pytest
 from ase import Atoms
 from ase import units as ase_units
 
-from tests.conftest import write_trajectory
 from mdins.provenance import Provenance
 from mdins.trajectory import VelocityTrajectory, read_velocities
 from mdins.units import PLANCK
+from tests.conftest import write_trajectory
 
 
 def synthetic(velocities, dt=0.002, masses=None, symbols=None):

@@ -11,10 +11,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from tests.conftest import write_trajectory
 from mdins.cli import main
 from mdins.ir import VelocitySpectralDensity
 from mdins.units import KB
+from tests.conftest import write_trajectory
 
 TEMPERATURE = 300.0
 ARGON_MASS = 39.948

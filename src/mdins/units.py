@@ -26,6 +26,7 @@ __all__ = [
     "KB",
     "KB_MEV",
     "MEV_PER_AMU_ANGSTROM2_PS2",
+    "NEUTRON_ENERGY_ANGSTROM2",
     "PICOSECOND",
     "PLANCK",
     "energy_to_angular_frequency",
@@ -57,6 +58,14 @@ PLANCK = constants.h / _MEV_IN_JOULES / PICOSECOND
 
 #: Boltzmann constant, in meV/K.
 KB_MEV = constants.value("Boltzmann constant in eV/K") * 1e3
+
+#: ``ħ²/2m_n`` in meV·Å², the constant relating a neutron's energy to its wavevector:
+#: ``E = NEUTRON_ENERGY_ANGSTROM2 · k²``. About 2.072. Used by the instrument kinematics
+#: and by nothing else, but it belongs here with the other conversions rather than being
+#: written as a literal at the point of use.
+NEUTRON_ENERGY_ANGSTROM2 = (
+    constants.hbar**2 / (2.0 * constants.neutron_mass) / _MEV_IN_JOULES / ANGSTROM**2
+)
 #: Boltzmann constant, in amu·Å²·ps⁻²·K⁻¹ — the form needed alongside MD velocities.
 KB = KB_MEV / MEV_PER_AMU_ANGSTROM2_PS2
 

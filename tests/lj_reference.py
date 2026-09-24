@@ -23,9 +23,11 @@ from mdins.spectral import velocity_spectral_density
 from mdins.trajectory import VelocityTrajectory
 
 if TYPE_CHECKING:  # pragma: no cover
+    from collections.abc import Sequence
+
     from ase import Atoms
 
-    from mdins.ir import SpectralDensity
+    from mdins.spectral import VelocitySpectralDensity
 
 #: Lennard-Jones argon, in ASE units (eV, Å).
 EPSILON = 0.0103
@@ -162,8 +164,14 @@ def reference_pdos(modes, primitive: Atoms) -> dict[str, tuple[NDArray, NDArray]
     Returns:
         Species to ``(frequencies, weights)``, both 1-D over the retained modes. The
         weight of atom ``i`` in mode ``s`` is ``|e_is|²`` summed over the three
-        Cartesian components, which is the harmonic equivalent of the atom-projected
-        velocity spectral density.
+        Cartesian components.
+
+    The velocity spectral weight of an atom is really ``|e_is|²·k_BT/m_i``, and the
+    ``1/m_i`` is *not* included here. Within one species it is a constant that divides
+    out of any normalised quantity, which is all this harness computes — but it means
+    the two species' arrays are not on a common scale. Summing them to build a total DOS
+    would over-weight krypton by the mass ratio. Normalise per species, or restore the
+    factor, before composing them.
     """
     frequencies = modes.frequencies.to("meV").magnitude
     per_atom = np.sum(np.abs(modes.eigenvectors) ** 2, axis=-1)
@@ -200,17 +208,21 @@ def acoustic_weight_fraction(modes, primitive: Atoms) -> dict[str, float]:
     }
 
 
-def run_nve(
+def md_trajectory(
     primitive: Atoms,
     supercell: tuple[int, int, int],
     *,
     seed: int = 0,
     n_frames: int = N_FRAMES,
-) -> SpectralDensity:
-    """NVE molecular dynamics on the same crystal, through the mdins pipeline.
+) -> VelocityTrajectory:
+    """NVE molecular dynamics on the crystal, as an mdins trajectory.
 
     Started at twice the target temperature because half the kinetic energy goes into
     potential energy as the system equilibrates.
+
+    Separate from :func:`run_nve` so that two estimators can be run over the *same*
+    velocities. Comparing estimators across separate trajectories would fold the
+    run-to-run scatter into the comparison and swamp the thing being measured.
     """
     from ase import units as ase_units
     from ase.md.velocitydistribution import MaxwellBoltzmannDistribution
@@ -229,7 +241,7 @@ def run_nve(
         dynamics.run(DUMP_EVERY)
         velocities[frame] = atoms.get_velocities() * ase_units.fs * 1e3
 
-    trajectory = VelocityTrajectory(
+    return VelocityTrajectory(
         velocities=velocities,
         masses=atoms.get_masses(),
         symbols=atoms.get_chemical_symbols(),
@@ -237,14 +249,35 @@ def run_nve(
         provenance=Provenance(source="ase-lj-nve"),
     ).remove_com_velocity()
 
-    return velocity_spectral_density(
-        trajectory,
-        e_max=20.0,
-        n_bins=400,
-        segment_length=SEGMENT_LENGTH,
-        temperature=trajectory.temperature(),
-        ensemble="NVE",
-    )
+
+def estimate(trajectory: VelocityTrajectory, **kwargs) -> VelocitySpectralDensity:
+    """Run stage B over a trajectory on the settings the whole of M2 shares.
+
+    Args:
+        trajectory: From :func:`md_trajectory`.
+        **kwargs: Override any of the defaults — in particular ``estimator="vacf"``,
+            which is how the two routes are compared on identical input.
+    """
+    settings: dict = {
+        "e_max": 20.0,
+        "n_bins": 400,
+        "segment_length": SEGMENT_LENGTH,
+        "temperature": trajectory.temperature(),
+        "ensemble": "NVE",
+    }
+    settings.update(kwargs)
+    return velocity_spectral_density(trajectory, **settings)
+
+
+def run_nve(
+    primitive: Atoms,
+    supercell: tuple[int, int, int],
+    *,
+    seed: int = 0,
+    n_frames: int = N_FRAMES,
+) -> VelocitySpectralDensity:
+    """Molecular dynamics and the Welch spectral density in one call."""
+    return estimate(md_trajectory(primitive, supercell, seed=seed, n_frames=n_frames))
 
 
 # -- comparison statistics --------------------------------------------------------
@@ -262,13 +295,26 @@ def moment_uncertainty(
 
     The derivative of a normalised moment with respect to one bin's weight is
     ``(E^n - <E^n>) / Σw``, so bins near the mean contribute almost nothing and the band
-    edges dominate. This is what makes the M2 tolerances derived rather than chosen.
+    edges dominate.
+
+    **This is not the uncertainty the tests use, and on its own it is badly wrong.** It
+    measures the scatter between Welch segments of a *single* trajectory, which in a
+    cold NVE crystal is nearly blind to the thing that actually moves the moments. The
+    normal-mode energies are constants of motion fixed by the initial Maxwell-Boltzmann
+    draw, so every segment of one run sees the same occupation of the same modes and
+    this number reports only phase and leakage noise at fixed occupation. Measured
+    against the run-to-run spread over :data:`SEEDS` it is too small by about a factor
+    of four. It is kept because it is the right diagnostic for *within-run* convergence
+    and because the figures quote it as such; the tolerances come from
+    :func:`ensemble_moment`.
     """
     centred = energies**order - moment(energies, weight, order)
     return float(np.sqrt(np.sum((error * centred) ** 2)) / np.sum(weight))
 
 
-def species_weight(density: SpectralDensity, species: str) -> tuple[NDArray, NDArray]:
+def species_weight(
+    density: VelocitySpectralDensity, species: str
+) -> tuple[NDArray, NDArray]:
     """Normalised pDOS of one species and its standard error.
 
     Per-atom errors are summed linearly rather than in quadrature, which is why this
@@ -282,3 +328,104 @@ def species_weight(density: SpectralDensity, species: str) -> tuple[NDArray, NDA
     error = density.pdos_std[index].sum(axis=0)
     total = pdos.sum()
     return pdos / total, error / total
+
+
+# -- the ensemble -----------------------------------------------------------------
+#
+# Everything above describes one trajectory. One trajectory is not enough, for a reason
+# that took a while to see and that is worth stating at length, because the obvious
+# error bar is the wrong one and it is wrong by a large factor.
+#
+# These runs are NVE on a crystal that is very nearly harmonic. In a harmonic system the
+# energy of each normal mode is a constant of motion: whatever the initial
+# Maxwell-Boltzmann draw happens to put into mode s stays in mode s for the whole run.
+# The pDOS weight of a mode is proportional to that energy, so the measured spectrum is
+# not the equilibrium spectrum — it is one draw from it, frozen at t=0 and held there.
+#
+# Two consequences follow, and they are the opposite of the intuition:
+#
+# 1. Running longer does not help. The draw never re-randomises, so the moments converge
+#    to a seed-dependent value rather than to the harmonic one.
+# 2. The inter-segment spread that ``velocity_spectral_density`` reports cannot see any
+#    of this, because every segment of one trajectory shares the same draw. It reports
+#    phase and leakage noise at fixed occupation, and comes out about four times too
+#    small.
+#
+# Measured here, single-species, six seeds: the first moment scatters by 3.7%, against a
+# propagated within-run error of 1.0%. Seeds 0 and 2 sit at the same temperature to
+# within 0.1 K and differ by six of those propagated sigmas.
+#
+# The fix is to average over independent draws and take the error bar from the scatter
+# between them. That is a measured sampling distribution rather than a modelled one, so
+# it needs no assumption about which bins or which atoms are correlated — the questions
+# that made the propagated version delicate. It costs one MD run per seed.
+
+#: Independent initial draws. The standard error on the ensemble mean falls as ``1/√n``
+#: while the cost rises as ``n``, so the number is set by how sharp the test needs to
+#: be. Ten gives about 1.2% on the single-species first moment, which makes the
+#: three-sigma threshold reject a frequency-axis error of roughly 3.5% — comfortably
+#: inside the 5% used by the negative control, and far inside any plausible unit slip.
+#: Six seeds would leave the control passing by only a quarter of its threshold.
+SEEDS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+
+
+def ensemble(
+    primitive: Atoms,
+    supercell: tuple[int, int, int],
+    *,
+    seeds: Sequence[int] = SEEDS,
+    n_frames: int = N_FRAMES,
+) -> list[VelocitySpectralDensity]:
+    """One spectral density per independent initial draw."""
+    return [
+        run_nve(primitive, supercell, seed=seed, n_frames=n_frames) for seed in seeds
+    ]
+
+
+def ensemble_moment(
+    densities: Sequence[VelocitySpectralDensity],
+    order: int,
+    *,
+    species: str | None = None,
+    limit: float | None = None,
+) -> tuple[float, float]:
+    """Mean and standard error of a spectral moment across the ensemble.
+
+    The moment is computed independently for each run and the spread is taken over
+    those, so the error bar is the sampling distribution of the statistic itself.
+
+    Args:
+        densities: The ensemble, as returned by :func:`ensemble`.
+        order: Moment order; 1 for the mean energy, 2 for the mean square.
+        species: Project onto one species first. ``None`` uses the whole system.
+        limit: Discard weight above this energy in meV, to keep the ``E^n`` weighting
+            from being dominated by the small leakage tail above the harmonic band.
+
+    Returns:
+        ``(mean, standard_error_of_the_mean)``, both in meV to the given power.
+    """
+    values = []
+    for density in densities:
+        energies = density.frequencies
+        if species is None:
+            weight = density.total_pdos()
+        else:
+            weight, _ = species_weight(density, species)
+        inside = slice(None) if limit is None else energies <= limit
+        values.append(moment(energies[inside], weight[inside], order))
+
+    sample = np.array(values)
+    return float(sample.mean()), float(sample.std(ddof=1) / np.sqrt(len(sample)))
+
+
+def ensemble_species_weight(
+    densities: Sequence[VelocitySpectralDensity], species: str
+) -> tuple[NDArray, NDArray]:
+    """Ensemble-mean normalised pDOS of one species, and its standard error per bin.
+
+    The per-bin error here is again the run-to-run scatter, not the within-run Welch
+    spread, so the shaded band in the figures means the same thing as the error bars on
+    the moments.
+    """
+    stack = np.array([species_weight(density, species)[0] for density in densities])
+    return stack.mean(axis=0), stack.std(axis=0, ddof=1) / np.sqrt(len(stack))
