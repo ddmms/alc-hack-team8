@@ -32,20 +32,21 @@ This design covers **Stage 1** of the MD-to-INS simulation workflow. The broader
   ```python
   @dataclass
   class TrajectoryData:
-      velocities: np.ndarray  # Shape: (n_steps, n_atoms, 3) in Angstrom/fs or m/s
+      velocities: np.ndarray  # Shape: (n_steps, n_atoms, 3) in Angstrom/fs
       symbols: list[str]      # Length: n_atoms
       masses: np.ndarray       # Shape: (n_atoms,) in amu
       timestep_fs: float       # Timestep in femtoseconds
       cell: np.ndarray | None  # Shape: (3, 3) unit cell vectors if periodic
   ```
-- **Rationale**: `ase.io` provides transparent support for nearly all atomistic file formats. The decoupled dataclass allows fast unit testing without touching disk.
+  If precomputed velocities exist in the trajectory, use them directly. If velocities are missing, calculate them via central finite differences from positions $\mathbf{v}(t) = \frac{\mathbf{r}(t+\Delta t) - \mathbf{r}(t-\Delta t)}{2 \Delta t}$ (applying minimum image convention for periodic cells), drop the first and last steps from the trajectory, and emit a visible `UserWarning`.
+- **Rationale**: `ase.io` provides transparent support for nearly all atomistic file formats. Providing a velocity derivation fallback ensures that position-only trajectory files (common in lightweight simulations) remain usable, while visibly notifying the user of the numerical differentiation and frame trimming.
 
 ### 2. In-House Vectorised Correlation Engine
 - **Decision**: Implement VACF via Wiener-Khinchin FFT theorem using `scipy.fft`:
   1. Zero-pad velocities along the time axis to length $2 N_{steps}$.
   2. Compute FFT of velocities, take squared magnitude, and inverse FFT to get the autocorrelation.
-  3. Apply time-domain window (Hann or Blackman) to damp spectral leakage before Fourier transforming to frequency space.
-- **Rationale**: Keeps dependencies minimal, achieves $O(N \log N)$ performance, and directly prepares the codebase for computing cross-correlation components in Stage 3.
+  3. Apply a robust default Hann window to damp spectral leakage before Fourier transforming to frequency space. The default window length and shape are configured to cleanly resolve low-frequency vibrational and librational modes down to tens of $\text{cm}^{-1}$ (approximately 2–5 meV) without requiring user tuning, while preserving optional customization (Blackman, rectangular).
+- **Rationale**: Keeps dependencies minimal, achieves $O(N \log N)$ performance, protects end-users from windowing subtleties while ensuring high spectral fidelity in the low-frequency acoustic regime, and directly prepares the codebase for computing cross-correlation components in Stage 3.
 
 ### 3. Energy/Frequency Units & Nyquist Grid Management
 - **Decision**: Internally manage frequencies in meV (standard for INS) with conversion utilities to $\text{cm}^{-1}$ and THz:
@@ -58,15 +59,20 @@ This design covers **Stage 1** of the MD-to-INS simulation workflow. The broader
   $$E_k(t) = \frac{1}{2} \sum_{i=1}^N m_i |\mathbf{v}_i(t)|^2, \quad T_{traj} = \frac{2 \langle E_k \rangle}{3 N k_B}$$
   If $|T_{traj} - T_{MD}| / T_{MD} > 0.2$, emit a `UserWarning`. Do not throw an error, as effective temperatures may deliberately differ from kinetic temperatures in certain sampling schemes.
 
-### 5. Harmonic Validation Strategy (Lennard-Jones + Euphonic)
-- **Decision**: Implement a self-contained test fixture:
+### 5. Harmonic Validation Strategy (Lennard-Jones + Phonopy + Euphonic)
+- **Decision**: Implement a self-contained test benchmark:
   1. Set up an FCC Argon supercell in ASE ($a \approx 5.26\text{ \AA}$).
-  2. Evaluate harmonic force constants using finite differences with ASE's Lennard-Jones calculator ($\epsilon = 0.01042\text{ eV}$, $\sigma = 3.4\text{ \AA}$).
-  3. Ingest force constants into Euphonic's `ForceConstants` model and calculate the harmonic phonon DOS over a fine $q$-point grid.
-  4. Run a brief ASE Velocity-Verlet NVE trajectory at $T = 10\text{ K}$.
-  5. Compute MD pDOS and assert:
+  2. Because Euphonic supports CASTEP and Phonopy formats for force constants but not ASE's native `ase.phonons`, implement a lightweight helper function connecting ASE calculators to `phonopy` (following the pattern in Calorine, without introducing Calorine as a dependency):
+     - Convert the ASE structure to `PhonopyAtoms`.
+     - Generate finite displacements using `Phonopy(structure, supercell_matrix)`.
+     - Evaluate supercell forces using ASE's Lennard-Jones calculator ($\epsilon = 0.01042\text{ eV}$, $\sigma = 3.4\text{ \AA}$).
+     - Compute force constants in Phonopy and export to Euphonic via `ForceConstants.from_phonopy()`.
+  3. Calculate the reference harmonic phonon DOS over a reciprocal-space $q$-point grid using Euphonic's `calculate_qpoint_phonon_modes().calculate_dos()`.
+  4. Run a brief ASE Velocity-Verlet NVE trajectory of the same system at $T = 10\text{ K}$.
+  5. Compute MD pDOS with default Hann windowing and assert:
      - Integral normalization: $\int g(\omega) d\omega \approx 1$.
      - Acoustic peak location matches Euphonic harmonic pDOS within 5%.
+- **Rationale**: Keeps the test suite fully autonomous and exact while cleanly bridging ASE calculators, Phonopy force constants, and Euphonic spectral calculation without adding unnecessary heavy dependencies.
 
 ## Component Architecture
 
