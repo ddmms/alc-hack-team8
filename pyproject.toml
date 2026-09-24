@@ -42,6 +42,8 @@ dev = [
   "mypy>=1.11",
   "scipy-stubs>=1.14",
 ]
+# Only needed to regenerate the figures in docs/validation.md, which are committed.
+docs = ["matplotlib>=3.8"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/mdins"]

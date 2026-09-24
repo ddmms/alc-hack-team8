@@ -932,6 +932,9 @@ dev = [
     { name = "scipy-stubs", version = "1.17.1.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "scipy-stubs", version = "1.18.1.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
 ]
+docs = [
+    { name = "matplotlib" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -951,6 +954,7 @@ dev = [
     { name = "ruff", specifier = ">=0.6" },
     { name = "scipy-stubs", specifier = ">=1.14" },
 ]
+docs = [{ name = "matplotlib", specifier = ">=3.8" }]
 
 [[package]]
 name = "mypy"

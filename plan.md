@@ -241,7 +241,17 @@ Scripted, run on demand, results written up rather than asserted:
   `NotImplementedError`.
 - **M1** — all of Layer 1 passes; pDOS from a real ASE trajectory; sum rule holds.
 - **M2** — Einstein crystal exact; LJ crystal within stated tolerance of Euphonic, with
-  the tolerance justified rather than tuned.
+  the tolerance justified rather than tuned. *Done.* `tests/test_md.py` covers the
+  Einstein crystal; `tests/test_euphonic.py` compares 3×3×3 LJ argon at 10 K against
+  Euphonic on the commensurate q-grid. The tolerance is the Welch inter-segment spread
+  propagated through each moment, not a fitted number: it comes out at 0.95% on the
+  first moment and 1.73% on the second, and the observed discrepancies are 0.6σ and
+  0.3σ. A negative control asserts that the same threshold rejects a 5% frequency
+  error, so the agreement is a measurement rather than a tolerance wide enough to
+  admit anything. A second crystal — ordered Ar/Kr, where the species-blind potential
+  makes mass the only asymmetry — checks the per-species projection, which the
+  single-species case cannot: every per-species moment agrees within 1.2σ. Written up
+  with figures in `docs/validation.md`.
 - **M3** — TOSCA spectrum for a published system, order-resolved, Layer 2's analytic
   multiphonon test passing.
 - **M4** — anisotropic path reproduces the isotropic one on isotropic input, and differs

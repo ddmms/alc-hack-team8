@@ -7,7 +7,7 @@ import pytest
 from ase import Atoms
 from ase import units as ase_units
 
-from conftest import write_trajectory
+from tests.conftest import write_trajectory
 from mdins.provenance import Provenance
 from mdins.trajectory import VelocityTrajectory, read_velocities
 from mdins.units import PLANCK
