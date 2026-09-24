@@ -33,9 +33,9 @@ This design covers **Stage 1** of the MD-to-INS simulation workflow. The broader
   @dataclass
   class TrajectoryData:
       velocities: np.ndarray  # Shape: (n_steps, n_atoms, 3) in Angstrom/fs
-      symbols: list[str]      # Length: n_atoms
-      masses: np.ndarray       # Shape: (n_atoms,) in amu
-      timestep_fs: float       # Timestep in femtoseconds
+      symbols: list[str]  # Length: n_atoms
+      masses: np.ndarray  # Shape: (n_atoms,) in amu
+      timestep_fs: float  # Timestep in femtoseconds
       cell: np.ndarray | None  # Shape: (3, 3) unit cell vectors if periodic
   ```
   If precomputed velocities exist in the trajectory, use them directly. If velocities are missing, calculate them via central finite differences from positions $\mathbf{v}(t) = \frac{\mathbf{r}(t+\Delta t) - \mathbf{r}(t-\Delta t)}{2 \Delta t}$ (applying minimum image convention for periodic cells), drop the first and last steps from the trajectory, and emit a visible `UserWarning`.

@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Virtual environment
+.venv/
+
+# Test / lint caches
+.pytest_cache/
+.ruff_cache/
+
+# Mac garbage
+.DS_STORE
